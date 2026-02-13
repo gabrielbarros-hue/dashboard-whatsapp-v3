@@ -9,7 +9,7 @@ from pathlib import Path
 
 # Configuração da página
 st.set_page_config(
-    page_title="Dashboard WhatsApp - Hub X Genesys",
+    page_title="Performance de Acionamento - HubSpot x Genesys",
     page_icon="📊",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -112,9 +112,8 @@ def load_data():
         try:
             df = pd.read_excel(DATA_FILE)
             
-            # Converter data para datetime se necessário
-            if 'Data de criação do Lead Raiz' in df.columns:
-                df['Data de criação do Lead Raiz'] = pd.to_datetime(df['Data de criação do Lead Raiz'], errors='coerce')
+            # NÃO converter data automaticamente para evitar perda de dados
+            # A conversão será feita apenas quando necessário, preservando dados originais
             
             return df
         except Exception as e:
@@ -296,8 +295,8 @@ def admin_mode():
 
 def viewer_mode():
     """Modo visualizador - permite filtros, visualização e exportação"""
-    st.markdown("<div class='main-header'>📊 Dashboard de Análise</div>", unsafe_allow_html=True)
-    st.markdown("<div class='sub-header'>Hub X Genesys - Disparos de WhatsApp</div>", unsafe_allow_html=True)
+    st.markdown("<div class='main-header'>📊 Performance de Acionamento de Leads</div>", unsafe_allow_html=True)
+    st.markdown("<div class='sub-header'>Cruzamento de base HubSpot vs. Disparos Genesys</div>", unsafe_allow_html=True)
     
     df = load_data()
     
@@ -309,23 +308,32 @@ def viewer_mode():
     # Sidebar - Filtros
     with st.sidebar:
         st.markdown("## 🎯 Filtros de Análise")
+        
+        # Mostrar total de leads na base
+        st.info(f"📊 **Base completa:** {len(df):,} leads".replace(",", "."))
+        
+        st.markdown("💡 **Dica:** Deixe os filtros vazios para ver todos os dados")
+        
         st.markdown("---")
         
         # Filtro de Colégio
         st.markdown("### 🏫 Colégio de Interesse")
-        colegios_disponiveis = sorted(df['Colégio de Interesse'].dropna().unique().tolist())
+        colegios_disponiveis = sorted(df['Colégio de Interesse'].unique().tolist())
         colegios_selecionados = st.multiselect(
-            "Selecione um ou mais colégios:",
+            "Selecione um ou mais colégios (vazio = todos):",
             colegios_disponiveis,
-            default=colegios_disponiveis,
-            label_visibility="collapsed"
+            default=None,
+            label_visibility="collapsed",
+            placeholder="Todos os colégios (clique para filtrar)"
         )
         
         st.markdown("---")
         
         # Filtro de Data
         st.markdown("### 📅 Período")
-        df_dates = df['Data de criação do Lead Raiz'].dropna()
+        # Converter apenas para extrair min/max
+        df_dates_temp = pd.to_datetime(df['Data de criação do Lead Raiz'], errors='coerce')
+        df_dates = df_dates_temp.dropna()
         
         if not df_dates.empty:
             min_date = df_dates.min().date()
@@ -352,55 +360,71 @@ def viewer_mode():
         st.markdown("### 🎯 Status de Disparo")
         status_disparo_options = ['Disparado', 'Não disparado']
         status_disparo_selecionados = st.multiselect(
-            "Selecione um ou mais status:",
+            "Selecione um ou mais status (vazio = todos):",
             status_disparo_options,
-            default=status_disparo_options,
-            label_visibility="collapsed"
+            default=None,
+            label_visibility="collapsed",
+            placeholder="Todos os status (clique para filtrar)"
         )
         
         st.markdown("---")
         
         # Filtro de Status do Lead
         st.markdown("### 📋 Status do Lead")
-        status_disponiveis = sorted(df['Status'].dropna().unique().tolist())
+        # Não usar dropna() para garantir que todos os status sejam incluídos
+        status_disponiveis = sorted(df['Status'].unique().tolist())
         status_selecionados = st.multiselect(
-            "Selecione um ou mais status:",
+            "Selecione um ou mais status (vazio = todos):",
             status_disponiveis,
-            default=status_disponiveis,
-            label_visibility="collapsed"
+            default=None,
+            label_visibility="collapsed",
+            placeholder="Todos os status (clique para filtrar)"
         )
         
         st.markdown("---")
         st.markdown("""
         <div style='text-align: center; padding: 1rem; background: #f0f2f6; border-radius: 10px;'>
-        <small><b>Dashboard WhatsApp</b><br>
-        Análise de Disparos de Leads</small>
+        <small><b>Performance de Acionamento</b><br>
+        HubSpot x Genesys</small>
         </div>
         """, unsafe_allow_html=True)
     
     # Aplicar filtros
     df_filtered = df.copy()
     
-    # Filtro de Colégio (múltipla escolha)
-    if colegios_selecionados:
+    # Filtro de Colégio (múltipla escolha) - se vazio, mostrar todos
+    if colegios_selecionados:  # Se tem algum selecionado, filtrar
         df_filtered = df_filtered[df_filtered['Colégio de Interesse'].isin(colegios_selecionados)]
+    # Se está vazio, não filtra (mostra todos)
     
-    # Filtro de Data
+    # Filtro de Data - converter e filtrar apenas se usuário alterou
     if start_date and end_date:
-        df_filtered = df_filtered[
-            (df_filtered['Data de criação do Lead Raiz'] >= pd.Timestamp(start_date)) &
-            (df_filtered['Data de criação do Lead Raiz'] <= pd.Timestamp(end_date))
-        ]
+        # Converter coluna de data apenas para este filtro
+        df_temp_dates = pd.to_datetime(df_filtered['Data de criação do Lead Raiz'], errors='coerce')
+        
+        df_dates_check = df_temp_dates.dropna()
+        if not df_dates_check.empty:
+            full_min = df_dates_check.min().date()
+            full_max = df_dates_check.max().date()
+            
+            # Só filtrar se usuário mudou as datas
+            if start_date != full_min or end_date != full_max:
+                df_filtered = df_filtered[
+                    (df_temp_dates >= pd.Timestamp(start_date)) &
+                    (df_temp_dates <= pd.Timestamp(end_date))
+                ]
     
-    # Filtro de Status de Disparo (múltipla escolha)
-    if status_disparo_selecionados:
+    # Filtro de Status de Disparo (múltipla escolha) - se vazio, mostrar todos
+    if status_disparo_selecionados:  # Se tem algum selecionado, filtrar
         df_filtered = df_filtered[
             df_filtered['Info Disparo'].str.strip().str.lower().isin([s.lower() for s in status_disparo_selecionados])
         ]
+    # Se está vazio, não filtra (mostra todos)
     
-    # Filtro de Status do Lead (múltipla escolha)
-    if status_selecionados:
+    # Filtro de Status do Lead (múltipla escolha) - se vazio, mostrar todos
+    if status_selecionados:  # Se tem algum selecionado, filtrar
         df_filtered = df_filtered[df_filtered['Status'].isin(status_selecionados)]
+    # Se está vazio, não filtra (mostra todos)
     
     # Métricas
     metrics = calculate_metrics(df_filtered)
